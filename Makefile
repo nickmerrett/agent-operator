@@ -52,9 +52,18 @@ test: manifests generate fmt vet envtest ## Run tests
 ##@ Build
 
 .PHONY: build
-build: generate fmt vet ## Build operator and runtime binaries
+build: generate fmt vet ## Build operator, runtime, and agentctl binaries
 	go build -o $(BIN_DIR)/operator ./cmd/operator/...
 	go build -o $(BIN_DIR)/agent-runtime ./cmd/agent-runtime/...
+	go build -o $(BIN_DIR)/agentctl ./cmd/agentctl/...
+
+.PHONY: build-agentctl
+build-agentctl: fmt vet ## Build agentctl CLI only (no code generation required)
+	go build -o $(BIN_DIR)/agentctl ./cmd/agentctl/...
+
+.PHONY: install-agentctl
+install-agentctl: ## Install agentctl to GOPATH/bin
+	go install ./cmd/agentctl/...
 
 .PHONY: run
 run: manifests generate fmt vet ## Run operator locally (requires kubeconfig)

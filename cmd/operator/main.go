@@ -82,7 +82,7 @@ func main() {
 
 	// ── Register built-in tools ───────────────────────────────────────────────
 	cat := tools.Global()
-	builtin.RegisterAll(cat)
+	builtin.RegisterAll(cat, mgr.GetClient())
 
 	// ── Register reconcilers ──────────────────────────────────────────────────
 	if err := (&controller.LLMProviderReconciler{

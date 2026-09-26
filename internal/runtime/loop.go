@@ -15,9 +15,18 @@ limitations under the License.
 */
 
 // Package runtime implements the agentic reasoning loop that runs inside each
-// ephemeral AgentRun pod. It drives the ReAct pattern:
+// ephemeral AgentRun pod.
 //
-//	Think (LLM) → Act (tool call) → Observe (tool result) → repeat
+// The loop follows the ReAct pattern (Reason + Act):
+//
+//	Think (LLM) → Act (parallel tool calls) → Observe (tool results) → repeat
+//
+// Improvements over a basic loop:
+//   - Parallel tool execution: all tool calls in a single LLM response run concurrently
+//   - Per-tool retry with exponential backoff on transient errors
+//   - Structured trace events emitted to Redis for observability
+//   - Inbound message subscription: accepts follow-up messages mid-run
+//   - Graceful timeout and maxIterations enforcement
 package runtime
 
 import (
@@ -25,6 +34,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nickmerrett/agent-operator/internal/llm"
@@ -34,11 +44,11 @@ import (
 
 // LoopConfig holds all the configuration needed to run one agent loop.
 type LoopConfig struct {
-	AgentName    string
-	AgentRunName string
-	SystemPrompt string
+	AgentName     string
+	AgentRunName  string
+	SystemPrompt  string
 	MaxIterations int32
-	Timeout      time.Duration
+	Timeout       time.Duration
 
 	LLMClient   llm.Client
 	MemoryStore memory.Store
@@ -48,16 +58,46 @@ type LoopConfig struct {
 	ToolSpecs []llm.ToolDefinition
 }
 
+// TraceEvent is a single observability event emitted during a run.
+// Events are stored as JSON in Redis under agentrun:{name}:trace (list).
+type TraceEvent struct {
+	Iteration int         `json:"iteration"`
+	Type      string      `json:"type"` // "think" | "tool_call" | "tool_result" | "inbound" | "final"
+	Timestamp string      `json:"timestamp"`
+	Data      interface{} `json:"data,omitempty"`
+}
+
+// toolResult holds the outcome of a single tool execution.
+type toolResult struct {
+	ToolCallID string
+	ToolName   string
+	Output     string
+	Err        error
+}
+
+const (
+	maxToolRetries    = 3
+	toolRetryBaseWait = 500 * time.Millisecond
+)
+
 // Run executes the agentic loop and returns the final Result.
 func Run(ctx context.Context, cfg LoopConfig, prompt string) Result {
 	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 
-	// Build the initial message list: system prompt + episodic memory + user prompt.
+	// Subscribe to inbound messages (follow-ups from the gateway).
+	inbound, unsubscribe, err := cfg.MemoryStore.SubscribeInbound(ctx, cfg.AgentRunName)
+	if err != nil {
+		// Non-fatal — run without inbound support.
+		inbound = make(chan string)
+	}
+	defer unsubscribe()
+
+	// Build initial message list.
 	messages := buildInitialMessages(ctx, cfg)
 	messages = append(messages, llm.Message{Role: llm.RoleUser, Content: prompt})
 
-	// Persist the initial messages to working memory.
+	// Persist initial messages to working memory.
 	for _, m := range messages {
 		_ = cfg.MemoryStore.AppendMessage(ctx, cfg.AgentRunName, m)
 	}
@@ -65,10 +105,17 @@ func Run(ctx context.Context, cfg LoopConfig, prompt string) Result {
 	tokensUsed := 0
 
 	for i := int32(0); i < cfg.MaxIterations; i++ {
-		// ── Think: ask the LLM ───────────────────────────────────────────────
+		// ── Drain any inbound messages before thinking ────────────────────────
+		messages = drainInbound(inbound, messages, ctx)
+
+		// ── Think: call the LLM ───────────────────────────────────────────────
+		emitTrace(ctx, cfg, i, "think", map[string]interface{}{
+			"messageCount": len(messages),
+		})
+
 		resp, err := cfg.LLMClient.Complete(ctx, llm.CompletionRequest{
-			Messages: messages,
-			Tools:    cfg.ToolSpecs,
+			Messages:  messages,
+			Tools:     cfg.ToolSpecs,
 		})
 		if err != nil {
 			return Result{
@@ -79,37 +126,58 @@ func Run(ctx context.Context, cfg LoopConfig, prompt string) Result {
 		}
 		tokensUsed += resp.TokensUsed
 
-		// ── Final answer: no tool call ────────────────────────────────────────
+		// ── Final answer: no tool calls ────────────────────────────────────────
 		if len(resp.ToolCalls) == 0 {
-			assistantMsg := llm.Message{Role: llm.RoleAssistant, Content: resp.Content}
+			answer := strings.TrimSpace(resp.Content)
+			assistantMsg := llm.Message{Role: llm.RoleAssistant, Content: answer}
 			_ = cfg.MemoryStore.AppendMessage(ctx, cfg.AgentRunName, assistantMsg)
+			emitTrace(ctx, cfg, i, "final", map[string]interface{}{
+				"answerLength": len(answer),
+				"tokensUsed":   tokensUsed,
+			})
 			return Result{
-				Answer:     resp.Content,
+				Answer:     answer,
 				Iterations: int(i) + 1,
 				TokensUsed: tokensUsed,
 			}
 		}
 
-		// ── Act: execute tool calls ───────────────────────────────────────────
-		// Append the assistant's tool call message.
-		toolCallMsg := buildToolCallMessage(resp.ToolCalls)
+		// ── Act: execute all tool calls in parallel ───────────────────────────
+		emitTrace(ctx, cfg, i, "tool_call", map[string]interface{}{
+			"tools": toolCallNames(resp.ToolCalls),
+			"count": len(resp.ToolCalls),
+		})
+
+		// Record the assistant's tool call intent.
+		toolCallMsg := llm.Message{
+			Role:    llm.RoleAssistant,
+			Content: marshalToolCalls(resp.ToolCalls),
+		}
 		messages = append(messages, toolCallMsg)
 		_ = cfg.MemoryStore.AppendMessage(ctx, cfg.AgentRunName, toolCallMsg)
 
-		// Execute each tool call and append the observation.
-		for _, tc := range resp.ToolCalls {
-			observation := executeToolCall(ctx, cfg.Tools, tc)
+		// Execute all tool calls concurrently.
+		results := executeToolCallsParallel(ctx, cfg.Tools, resp.ToolCalls)
+
+		// Append observations in original order.
+		for _, tr := range results {
 			obsMsg := llm.Message{
 				Role:       llm.RoleTool,
-				Content:    observation,
-				ToolCallID: tc.ID,
-				Name:       tc.Name,
+				Content:    tr.Output,
+				ToolCallID: tr.ToolCallID,
+				Name:       tr.ToolName,
 			}
 			messages = append(messages, obsMsg)
 			_ = cfg.MemoryStore.AppendMessage(ctx, cfg.AgentRunName, obsMsg)
+
+			emitTrace(ctx, cfg, i, "tool_result", map[string]interface{}{
+				"tool":    tr.ToolName,
+				"hasErr":  tr.Err != nil,
+				"outputLen": len(tr.Output),
+			})
 		}
 
-		// Check for inbound follow-up messages (non-blocking).
+		// Check context deadline after each iteration.
 		select {
 		case <-ctx.Done():
 			return Result{
@@ -128,12 +196,141 @@ func Run(ctx context.Context, cfg LoopConfig, prompt string) Result {
 	}
 }
 
-// buildInitialMessages constructs the initial message list from system prompt + episodic memory.
-func buildInitialMessages(ctx context.Context, cfg LoopConfig) []llm.Message {
-	var msgs []llm.Message
+// ── Parallel tool execution ───────────────────────────────────────────────────
 
+// executeToolCallsParallel runs all tool calls concurrently and returns results
+// in the same order as the input slice.
+func executeToolCallsParallel(ctx context.Context, toolMap map[string]tools.Executor, calls []llm.ToolCall) []toolResult {
+	results := make([]toolResult, len(calls))
+	var wg sync.WaitGroup
+
+	for idx, tc := range calls {
+		wg.Add(1)
+		go func(i int, call llm.ToolCall) {
+			defer wg.Done()
+			output, err := executeWithRetry(ctx, toolMap, call)
+			results[i] = toolResult{
+				ToolCallID: call.ID,
+				ToolName:   call.Name,
+				Output:     output,
+				Err:        err,
+			}
+		}(idx, tc)
+	}
+
+	wg.Wait()
+	return results
+}
+
+// executeWithRetry executes a single tool call with exponential backoff retry
+// on transient errors. Tool errors are always returned as observations —
+// they never crash the loop.
+func executeWithRetry(ctx context.Context, toolMap map[string]tools.Executor, tc llm.ToolCall) (string, error) {
+	executor, ok := toolMap[tc.Name]
+	if !ok {
+		errMsg := fmt.Sprintf("ERROR: tool %q not found in available tools", tc.Name)
+		return errMsg, fmt.Errorf("tool not found: %s", tc.Name)
+	}
+
+	var args map[string]interface{}
+	if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
+		errMsg := fmt.Sprintf("ERROR: could not parse arguments for tool %q: %v", tc.Name, err)
+		return errMsg, err
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < maxToolRetries; attempt++ {
+		if attempt > 0 {
+			wait := toolRetryBaseWait * time.Duration(1<<uint(attempt-1))
+			select {
+			case <-ctx.Done():
+				return fmt.Sprintf("ERROR: context cancelled while retrying tool %q", tc.Name), ctx.Err()
+			case <-time.After(wait):
+			}
+		}
+
+		toolCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		output, err := executor.Execute(toolCtx, args)
+		cancel()
+
+		if err == nil {
+			data, _ := json.Marshal(output)
+			return string(data), nil
+		}
+		lastErr = err
+
+		// Only retry on what look like transient errors.
+		if !isTransientError(err) {
+			break
+		}
+	}
+
+	// Return error as an observation — the agent can reason about it.
+	return fmt.Sprintf("ERROR from tool %q (after %d attempts): %v", tc.Name, maxToolRetries, lastErr), lastErr
+}
+
+// isTransientError returns true for errors that are worth retrying.
+func isTransientError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "temporary") ||
+		strings.Contains(msg, "503") ||
+		strings.Contains(msg, "429")
+}
+
+// ── Inbound message handling ──────────────────────────────────────────────────
+
+// drainInbound non-blockingly drains any queued inbound messages and appends
+// them as user turns to the message history.
+func drainInbound(inbound <-chan string, messages []llm.Message, ctx context.Context) []llm.Message {
+	for {
+		select {
+		case msg, ok := <-inbound:
+			if !ok {
+				return messages
+			}
+			messages = append(messages, llm.Message{
+				Role:    llm.RoleUser,
+				Content: "[Follow-up] " + msg,
+			})
+		case <-ctx.Done():
+			return messages
+		default:
+			return messages
+		}
+	}
+}
+
+// ── Trace emission ────────────────────────────────────────────────────────────
+
+// emitTrace appends a structured trace event to Redis.
+// Failures are silently ignored — tracing must not affect the run.
+func emitTrace(ctx context.Context, cfg LoopConfig, iteration int32, eventType string, data interface{}) {
+	event := TraceEvent{
+		Iteration: int(iteration),
+		Type:      eventType,
+		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+		Data:      data,
+	}
+	eventJSON, err := json.Marshal(event)
+	if err != nil {
+		return
+	}
+	// Publish as a message to the agentrun trace channel.
+	// The memory.Store doesn't have a dedicated trace method, so we reuse
+	// AppendMessage with a special role to keep things simple.
+	_ = cfg.MemoryStore.AppendMessage(ctx, cfg.AgentRunName+":trace", llm.Message{
+		Role:    "trace",
+		Content: string(eventJSON),
+	})
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+func buildInitialMessages(ctx context.Context, cfg LoopConfig) []llm.Message {
 	systemContent := cfg.SystemPrompt
-	// Prepend episodic memory summary if available.
+
 	episodes, err := cfg.MemoryStore.GetEpisodes(ctx, cfg.AgentName, 5)
 	if err == nil && len(episodes) > 0 {
 		var sb strings.Builder
@@ -144,44 +341,18 @@ func buildInitialMessages(ctx context.Context, cfg LoopConfig) []llm.Message {
 		systemContent += sb.String()
 	}
 
-	msgs = append(msgs, llm.Message{Role: llm.RoleSystem, Content: systemContent})
-	return msgs
+	return []llm.Message{{Role: llm.RoleSystem, Content: systemContent}}
 }
 
-// buildToolCallMessage creates an assistant message that records the tool call(s).
-func buildToolCallMessage(toolCalls []llm.ToolCall) llm.Message {
-	// Serialise tool calls as JSON so the message is inspectable.
-	data, _ := json.Marshal(toolCalls)
-	return llm.Message{
-		Role:    llm.RoleAssistant,
-		Content: string(data),
-	}
-}
-
-// executeToolCall runs a single tool call and returns the observation string.
-// Errors are captured as observations rather than panics — the agent can recover.
-func executeToolCall(ctx context.Context, toolMap map[string]tools.Executor, tc llm.ToolCall) string {
-	executor, ok := toolMap[tc.Name]
-	if !ok {
-		return fmt.Sprintf("ERROR: tool %q not found", tc.Name)
-	}
-
-	var args map[string]interface{}
-	if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
-		return fmt.Sprintf("ERROR: could not parse arguments for tool %q: %v", tc.Name, err)
-	}
-
-	toolCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	output, err := executor.Execute(toolCtx, args)
-	if err != nil {
-		return fmt.Sprintf("ERROR from tool %q: %v", tc.Name, err)
-	}
-
-	data, err := json.Marshal(output)
-	if err != nil {
-		return fmt.Sprintf("ERROR: could not serialise output from tool %q: %v", tc.Name, err)
-	}
+func marshalToolCalls(calls []llm.ToolCall) string {
+	data, _ := json.Marshal(calls)
 	return string(data)
+}
+
+func toolCallNames(calls []llm.ToolCall) []string {
+	names := make([]string, len(calls))
+	for i, c := range calls {
+		names[i] = c.Name
+	}
+	return names
 }

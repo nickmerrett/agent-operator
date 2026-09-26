@@ -17,10 +17,13 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -a -ldflags="-w -s" -o /out/agent-runtime ./cmd/agent-runtime/...
 
 # ── Runtime stage ───────────────────────────────────────────────────────────────
-# Uses a minimal image — agent-runtime pods are ephemeral and security-sensitive.
-FROM gcr.io/distroless/static:nonroot
+# Uses alpine (not distroless) so shell-exec and other tools that call /bin/sh work.
+FROM alpine:3.19
+RUN apk add --no-cache ca-certificates bash curl jq
 
 COPY --from=builder /out/agent-runtime /agent-runtime
 
-USER 65532:65532
+# Run as non-root
+RUN addgroup -S agent && adduser -S agent -G agent
+USER agent:agent
 ENTRYPOINT ["/agent-runtime"]

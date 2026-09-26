@@ -103,7 +103,7 @@ func main() {
 
 	// ── Register built-in tools and build tool map ────────────────────────────
 	cat := tools.Global()
-	builtin.RegisterAll(cat)
+	builtin.RegisterAll(cat, k8sClient)
 
 	toolMap := make(map[string]tools.Executor)
 	toolSpecs := make([]llm.ToolDefinition, 0)

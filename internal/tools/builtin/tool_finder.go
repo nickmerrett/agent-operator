@@ -15,26 +15,32 @@ limitations under the License.
 */
 
 // Package builtin provides implementations of all built-in tools and registers
-// them in the global catalogue at init time.
+// them in the global catalogue.
 package builtin
 
 import (
 	"context"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/nickmerrett/agent-operator/internal/tools"
 )
 
-// RegisterAll registers all built-in tools into the global catalogue.
+// RegisterAll registers all built-in tools into the catalogue.
+// k8sClient is the in-cluster Kubernetes client used by kubectl-get and kubectl-apply.
+// Pass nil to disable kubectl tools (e.g. in unit tests).
 // Call this once during operator/runtime startup.
-func RegisterAll(cat *tools.Catalogue) {
+func RegisterAll(cat *tools.Catalogue, k8sClient client.Client) {
 	cat.Register(tools.Entry{Spec: toolFinderSpec(), Executor: &toolFinderExecutor{cat: cat}})
 	cat.Register(tools.Entry{Spec: httpRequestSpec(), Executor: &httpRequestExecutor{}})
 	cat.Register(tools.Entry{Spec: fsReadSpec(), Executor: &fsReadExecutor{}})
 	cat.Register(tools.Entry{Spec: fsWriteSpec(), Executor: &fsWriteExecutor{}})
 	cat.Register(tools.Entry{Spec: fsListSpec(), Executor: &fsListExecutor{}})
 	cat.Register(tools.Entry{Spec: shellExecSpec(), Executor: &shellExecExecutor{}})
-	cat.Register(tools.Entry{Spec: kubectlGetSpec(), Executor: &kubectlGetExecutor{}})
-	cat.Register(tools.Entry{Spec: kubectlApplySpec(), Executor: &kubectlApplyExecutor{}})
+	if k8sClient != nil {
+		cat.Register(tools.Entry{Spec: kubectlGetSpec(), Executor: &kubectlGetExecutor{Client: k8sClient}})
+		cat.Register(tools.Entry{Spec: kubectlApplySpec(), Executor: &kubectlApplyExecutor{Client: k8sClient}})
+	}
 }
 
 // toolFinderSpec is the tool-finder tool — searches the catalogue by keyword.
