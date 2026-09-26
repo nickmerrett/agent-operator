@@ -1,0 +1,26 @@
+# ── Build stage ────────────────────────────────────────────────────────────────
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /workspace
+
+# Cache dependencies
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source
+COPY api/              api/
+COPY internal/         internal/
+COPY cmd/agent-runtime/ cmd/agent-runtime/
+
+# Build
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -a -ldflags="-w -s" -o /out/agent-runtime ./cmd/agent-runtime/...
+
+# ── Runtime stage ───────────────────────────────────────────────────────────────
+# Uses a minimal image — agent-runtime pods are ephemeral and security-sensitive.
+FROM gcr.io/distroless/static:nonroot
+
+COPY --from=builder /out/agent-runtime /agent-runtime
+
+USER 65532:65532
+ENTRYPOINT ["/agent-runtime"]

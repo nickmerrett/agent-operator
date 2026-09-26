@@ -1,0 +1,28 @@
+apiVersion: agent.runtime.io/v1alpha1
+kind: LLMProvider
+metadata:
+  name: watsonx-prod
+  namespace: team-alpha
+spec:
+  type: watsonx
+  endpoint: https://us-south.ml.cloud.ibm.com
+  model: ibm/granite-3-3-8b-instruct
+  credentialsSecret: watsonx-creds
+  parameters:
+    temperature: "0.7"
+    maxTokens: "4096"
+---
+# Secret referenced by the LLMProvider above.
+# Create with: kubectl create secret generic watsonx-creds \
+#   --from-literal=api_key=<your-api-key> \
+#   --from-literal=project_id=<your-project-id> \
+#   -n team-alpha
+apiVersion: v1
+kind: Secret
+metadata:
+  name: watsonx-creds
+  namespace: team-alpha
+type: Opaque
+stringData:
+  api_key: "REPLACE_ME"
+  project_id: "REPLACE_ME"

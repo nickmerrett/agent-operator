@@ -1,0 +1,19 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-operator
+  namespace: agent-operator-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: agent-operator-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: agent-operator-role
+subjects:
+  - kind: ServiceAccount
+    name: agent-operator
+    namespace: agent-operator-system

@@ -1,0 +1,23 @@
+apiVersion: agent.runtime.io/v1alpha1
+kind: Agent
+metadata:
+  name: research-agent
+  namespace: team-alpha
+spec:
+  llmProvider: watsonx-prod
+  memoryProvider: redis-memory
+  systemPrompt: |
+    You are a research assistant with access to a set of tools.
+    Use tools to gather information and answer questions accurately.
+    Always use the tool-finder tool first if you are unsure what tools are available.
+    Provide clear, concise, and well-structured answers.
+  tools:
+    - tool-finder
+    - http-request
+    - filesystem-read
+    - filesystem-list
+    - shell-exec
+  mcpServers:
+    - example-mcp
+  maxIterations: 25
+  timeoutSeconds: 300

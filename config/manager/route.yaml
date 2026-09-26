@@ -1,0 +1,15 @@
+# OpenShift Route — alternative to Ingress for OpenShift clusters
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: agent-operator-gateway
+  namespace: agent-operator-system
+spec:
+  to:
+    kind: Service
+    name: agent-operator-gateway
+  port:
+    targetPort: gateway
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

@@ -1,0 +1,16 @@
+# Example AgentRun — normally created by the HTTP gateway, not by hand.
+# You can apply this directly for testing:
+#   kubectl apply -f sample_agentrun.yaml -n team-alpha
+#   kubectl get agentrun -n team-alpha -w
+apiVersion: agent.runtime.io/v1alpha1
+kind: AgentRun
+metadata:
+  name: research-agent-run-example
+  namespace: team-alpha
+spec:
+  agentRef: research-agent
+  input:
+    prompt: "What are the key differences between Kubernetes operators and controllers? Provide a concise technical summary."
+    context:
+      requestedBy: "example-user"
+  # callbackURL: "https://my-app.example.com/webhook/agent-result"

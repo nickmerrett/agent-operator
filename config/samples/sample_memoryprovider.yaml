@@ -1,0 +1,28 @@
+apiVersion: agent.runtime.io/v1alpha1
+kind: MemoryProvider
+metadata:
+  name: redis-memory
+  namespace: team-alpha
+spec:
+  type: redis
+  connectionSecret: redis-creds
+  workingMemoryTTL: 3600
+  episodicMemoryEnabled: true
+  episodicMemoryTTL: 604800
+---
+# Secret referenced by the MemoryProvider above.
+# Create with: kubectl create secret generic redis-creds \
+#   --from-literal=host=redis.team-alpha.svc.cluster.local \
+#   --from-literal=port=6379 \
+#   --from-literal=password=<your-redis-password> \
+#   -n team-alpha
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-creds
+  namespace: team-alpha
+type: Opaque
+stringData:
+  host: "redis.team-alpha.svc.cluster.local"
+  port: "6379"
+  password: "REPLACE_ME"

@@ -1,0 +1,72 @@
+---
+apiVersion: agent.runtime.io/v1alpha1
+kind: Tool
+metadata:
+  name: tool-finder
+  namespace: team-alpha
+spec:
+  description: "Search the available tool catalogue by keyword or capability description."
+  builtIn: tool-finder
+---
+apiVersion: agent.runtime.io/v1alpha1
+kind: Tool
+metadata:
+  name: http-request
+  namespace: team-alpha
+spec:
+  description: "Make an HTTP request to an external URL."
+  builtIn: http-request
+---
+apiVersion: agent.runtime.io/v1alpha1
+kind: Tool
+metadata:
+  name: filesystem-read
+  namespace: team-alpha
+spec:
+  description: "Read the contents of a file from the filesystem."
+  builtIn: filesystem-read
+---
+apiVersion: agent.runtime.io/v1alpha1
+kind: Tool
+metadata:
+  name: filesystem-write
+  namespace: team-alpha
+spec:
+  description: "Write content to a file on the filesystem."
+  builtIn: filesystem-write
+---
+apiVersion: agent.runtime.io/v1alpha1
+kind: Tool
+metadata:
+  name: filesystem-list
+  namespace: team-alpha
+spec:
+  description: "List the contents of a directory."
+  builtIn: filesystem-list
+---
+apiVersion: agent.runtime.io/v1alpha1
+kind: Tool
+metadata:
+  name: shell-exec
+  namespace: team-alpha
+spec:
+  description: "Execute a shell command and return its output."
+  builtIn: shell-exec
+---
+apiVersion: agent.runtime.io/v1alpha1
+kind: Tool
+metadata:
+  name: kubectl-get
+  namespace: team-alpha
+spec:
+  description: "Get a Kubernetes resource by kind, name, and namespace."
+  builtIn: kubectl-get
+---
+apiVersion: agent.runtime.io/v1alpha1
+kind: Tool
+metadata:
+  name: kubectl-apply
+  namespace: team-alpha
+spec:
+  description: "Apply a Kubernetes manifest to the cluster."
+  builtIn: kubectl-apply

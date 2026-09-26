@@ -1,0 +1,10 @@
+apiVersion: agent.runtime.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: example-mcp
+  namespace: team-alpha
+spec:
+  transport: http
+  endpoint: http://example-mcp-server.team-alpha.svc.cluster.local:8080
+  autoDiscoverTools: true
+  # credentialsSecret: mcp-creds  # uncomment if the server requires auth

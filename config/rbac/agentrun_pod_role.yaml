@@ -1,0 +1,43 @@
+# Role bound to the ServiceAccount used by AgentRun pods (agent-runtime).
+# This is namespace-scoped — each namespace gets its own binding.
+# Apply this in every namespace where agents will run.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agent-runtime-role
+  # namespace: <your-namespace>
+rules:
+  # Read Tool and MCPServer CRs to resolve the tool list
+  - apiGroups: ["agent.runtime.io"]
+    resources: ["tools", "mcpservers", "agents", "llmproviders", "memoryproviders"]
+    verbs: ["get", "list"]
+
+  # Read Secrets for LLM and memory credentials
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+
+  # Read AgentRun CR to get configuration
+  - apiGroups: ["agent.runtime.io"]
+    resources: ["agentruns"]
+    verbs: ["get"]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-runtime
+  # namespace: <your-namespace>
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-runtime-rolebinding
+  # namespace: <your-namespace>
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: agent-runtime-role
+subjects:
+  - kind: ServiceAccount
+    name: agent-runtime
+    # namespace: <your-namespace>

@@ -1,0 +1,49 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-operator-role
+rules:
+  # Full access to all agent.runtime.io CRDs
+  - apiGroups: ["agent.runtime.io"]
+    resources:
+      - llmproviders
+      - llmproviders/status
+      - memoryproviders
+      - memoryproviders/status
+      - tools
+      - tools/status
+      - mcpservers
+      - mcpservers/status
+      - agents
+      - agents/status
+      - agentruns
+      - agentruns/status
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Pod management for AgentRun ephemeral pods
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+
+  # Read Secrets (for credential resolution)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+
+  # Read/write ConfigMaps (for result passing — future use)
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+  # Leader election
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Events
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]

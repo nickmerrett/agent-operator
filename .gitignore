@@ -1,0 +1,24 @@
+# Binaries
+bin/
+
+# Go build cache
+*.test
+*.out
+cover.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated (keep zz_generated.deepcopy.go but not other generated artifacts)
+config/crd/*.yaml
+
+# Environment
+.env
+.env.local
