@@ -187,6 +187,14 @@ func (r *AgentRunReconciler) buildPod(
 		UID:        agentRun.UID,
 	}
 
+	// Security context values: non-root UID 1000, drop all capabilities.
+	// These values satisfy both the Kubernetes restricted PodSecurity standard
+	// and the OpenShift restricted-v2 SCC without requiring any privilege.
+	uid := int64(1000)
+	gid := int64(1000)
+	allowPrivEsc := false
+	readOnlyRoot := true
+
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      podName,
@@ -201,10 +209,39 @@ func (r *AgentRunReconciler) buildPod(
 		Spec: corev1.PodSpec{
 			RestartPolicy:      corev1.RestartPolicyNever,
 			ServiceAccountName: "agent-runtime",
+			// Pod-level security context satisfies restricted PodSecurity / OpenShift SCC.
+			SecurityContext: &corev1.PodSecurityContext{
+				RunAsNonRoot: boolPtr(true),
+				RunAsUser:    &uid,
+				RunAsGroup:   &gid,
+				FSGroup:      &gid,
+				SeccompProfile: &corev1.SeccompProfile{
+					Type: corev1.SeccompProfileTypeRuntimeDefault,
+				},
+			},
+			Volumes: []corev1.Volume{
+				{
+					// Writable /tmp for the runtime binary (root FS is read-only).
+					Name: "tmp",
+					VolumeSource: corev1.VolumeSource{
+						EmptyDir: &corev1.EmptyDirVolumeSource{},
+					},
+				},
+			},
 			Containers: []corev1.Container{
 				{
 					Name:  "agent-runtime",
 					Image: r.RuntimeImage,
+					SecurityContext: &corev1.SecurityContext{
+						AllowPrivilegeEscalation: &allowPrivEsc,
+						ReadOnlyRootFilesystem:   &readOnlyRoot,
+						Capabilities: &corev1.Capabilities{
+							Drop: []corev1.Capability{"ALL"},
+						},
+					},
+					VolumeMounts: []corev1.VolumeMount{
+						{Name: "tmp", MountPath: "/tmp"},
+					},
 					Env: []corev1.EnvVar{
 						{Name: "AGENT_NAME", Value: agent.Name},
 						{Name: "AGENT_NAMESPACE", Value: agentRun.Namespace},
@@ -232,6 +269,9 @@ func (r *AgentRunReconciler) buildPod(
 		},
 	}
 }
+
+// boolPtr returns a pointer to the given bool value.
+func boolPtr(b bool) *bool { return &b }
 
 func (r *AgentRunReconciler) setFailed(ctx context.Context, ar *agentv1alpha1.AgentRun, reason, message string) (ctrl.Result, error) {
 	now := metav1.NewTime(time.Now())

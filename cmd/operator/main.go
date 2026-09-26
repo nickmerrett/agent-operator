@@ -45,7 +45,6 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(agentv1alpha1.AddToScheme(scheme))
-	utilruntime.Must(agentv1alpha1.AddToScheme(scheme)) // registers all types including new CRDs
 }
 
 func main() {

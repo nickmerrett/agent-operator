@@ -42,7 +42,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentv1alpha1 "github.com/nickmerrett/agent-operator/api/v1alpha1"
@@ -391,7 +390,3 @@ func secretDataToMap(data map[string][]byte) map[string]string {
 	return m
 }
 
-// getK8sConfig returns the controller-runtime REST config.
-func getK8sConfig() interface{} {
-	return ctrl.GetConfigOrDie()
-}

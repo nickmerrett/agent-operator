@@ -1,0 +1,84 @@
+# OpenShift SecurityContextConstraints for AgentRun runtime pods.
+#
+# This SCC is equivalent to the built-in "restricted-v2" SCC but is given
+# an explicit name so that it can be granted to the agent-runtime ServiceAccount
+# independently of other workloads.
+#
+# Design rules:
+#   - No root UID, no privilege escalation, no host access of any kind.
+#   - Requires runAsNonRoot, drops ALL capabilities.
+#   - Allows RuntimeDefault seccomp profile only.
+#   - Permits emptyDir volumes (needed for /tmp scratch space).
+#
+# Apply once per cluster (cluster-scoped resource):
+#   oc apply -f config/rbac/agent-runtime-scc.yaml
+---
+apiVersion: security.openshift.io/v1
+kind: SecurityContextConstraints
+metadata:
+  name: agent-runtime-restricted
+  annotations:
+    kubernetes.io/description: >
+      Restricted SCC for agent-operator runtime pods. Equivalent to restricted-v2.
+      Grants no additional privileges — pods must run as non-root with all
+      capabilities dropped.
+allowPrivilegedContainer: false
+allowPrivilegeEscalation: false
+allowHostDirVolumePlugin: false
+allowHostIPC: false
+allowHostNetwork: false
+allowHostPID: false
+allowHostPorts: false
+readOnlyRootFilesystem: false   # enforced at the container level in buildPod()
+defaultAllowPrivilegeEscalation: false
+requiredDropCapabilities:
+  - ALL
+runAsUser:
+  type: MustRunAsNonRoot
+seLinuxContext:
+  type: MustRunAs
+supplementalGroups:
+  type: RunAsAny
+fsGroup:
+  type: MustRunAs
+  ranges:
+    - min: 1000
+      max: 65535
+seccompProfiles:
+  - runtime/default
+volumes:
+  - emptyDir
+  - secret
+  - configMap
+  - projected
+  - downwardAPI
+---
+# Bind the SCC to the agent-runtime ServiceAccount via a ClusterRole + ClusterRoleBinding.
+# The ClusterRole allows the SCC to be used in any namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-runtime-scc-use
+rules:
+  - apiGroups: ["security.openshift.io"]
+    resources: ["securitycontextconstraints"]
+    resourceNames: ["agent-runtime-restricted"]
+    verbs: ["use"]
+---
+# ClusterRoleBinding — grants the SCC use to the agent-runtime SA in ALL namespaces.
+# If you want per-namespace control, replace this with per-namespace RoleBindings.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: agent-runtime-scc-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: agent-runtime-scc-use
+subjects:
+  - kind: Group
+    apiGroup: rbac.authorization.k8s.io
+    # system:serviceaccounts matches the agent-runtime SA in every namespace.
+    # Narrow this to a specific namespace by using kind: ServiceAccount with
+    # name: agent-runtime and namespace: <ns> if tighter control is required.
+    name: "system:serviceaccounts"

@@ -31,6 +31,7 @@ import (
 	"time"
 
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -154,6 +155,51 @@ func main() {
 		}
 	}
 
+	// ── Load AgentPolicy (namespace-scoped, optional) ─────────────────────────
+	var agentPolicy *agentv1alpha1.AgentPolicy
+	var apList agentv1alpha1.AgentPolicyList
+	if err := k8sClient.List(ctx, &apList, client.InNamespace(agentNamespace)); err == nil && len(apList.Items) > 0 {
+		ap := apList.Items[0]
+		agentPolicy = &ap
+	}
+
+	// ── Load ClusterPolicy (cluster-scoped, optional) ─────────────────────────
+	var clusterPolicy *agentv1alpha1.ClusterPolicy
+	var cpList agentv1alpha1.ClusterPolicyList
+	if err := k8sClient.List(ctx, &cpList); err == nil && len(cpList.Items) > 0 {
+		cp := cpList.Items[0]
+		clusterPolicy = &cp
+	}
+
+	// ── Optionally load PromptTemplate ────────────────────────────────────────
+	var promptTmpl *agentv1alpha1.PromptTemplate
+	if agent.Spec.SystemPromptRef != "" {
+		var pt agentv1alpha1.PromptTemplate
+		err := k8sClient.Get(ctx, types.NamespacedName{Name: agent.Spec.SystemPromptRef, Namespace: agentNamespace}, &pt)
+		if err != nil && !apierrors.IsNotFound(err) {
+			fatalf("get PromptTemplate %q: %v", agent.Spec.SystemPromptRef, err)
+		}
+		if err == nil {
+			promptTmpl = &pt
+		}
+	}
+
+	// ── Compose system prompt (7-layer) ───────────────────────────────────────
+	systemPrompt, err := agentruntime.ComposeSystemPrompt(ctx, agentruntime.PromptComposerConfig{
+		Agent:         agent.Spec,
+		PromptTmpl:    promptTmpl,
+		AgentPolicy:   agentPolicy,
+		ClusterPolicy: clusterPolicy,
+		MemoryStore:   memStore,
+		AgentName:     agentName,
+	})
+	if err != nil {
+		fatalf("compose system prompt: %v", err)
+	}
+
+	// ── Resolve effective policy ──────────────────────────────────────────────
+	effectivePolicy := agentruntime.ResolvePolicy(clusterPolicy, agentPolicy, agent.Spec.MaxIterations)
+
 	// ── Run the agentic loop ──────────────────────────────────────────────────
 	timeout := time.Duration(agent.Spec.TimeoutSeconds) * time.Second
 	if timeout == 0 {
@@ -163,13 +209,14 @@ func main() {
 	cfg := agentruntime.LoopConfig{
 		AgentName:     agentName,
 		AgentRunName:  agentRunName,
-		SystemPrompt:  agent.Spec.SystemPrompt,
-		MaxIterations: agent.Spec.MaxIterations,
+		SystemPrompt:  systemPrompt,
+		MaxIterations: effectivePolicy.MaxIterations,
 		Timeout:       timeout,
 		LLMClient:     llmClient,
 		MemoryStore:   memStore,
 		Tools:         toolMap,
 		ToolSpecs:     toolSpecs,
+		Policy:        &effectivePolicy,
 	}
 
 	result := agentruntime.Run(ctx, cfg, prompt)

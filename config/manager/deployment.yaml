@@ -16,9 +16,14 @@ spec:
         app: agent-operator
     spec:
       serviceAccountName: agent-operator
+      # Pod-level security context — satisfies restricted PodSecurity and OpenShift SCC.
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: operator
           image: ghcr.io/nickmerrett/agent-operator:latest
@@ -39,6 +44,12 @@ spec:
             - name: healthz
               containerPort: 8082
               protocol: TCP
+          # Container-level security context.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           livenessProbe:
             httpGet:
               path: /healthz
@@ -58,9 +69,16 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+          # Writable scratch space needed when root filesystem is read-only.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           env:
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+      volumes:
+        - name: tmp
+          emptyDir: {}
       terminationGracePeriodSeconds: 30

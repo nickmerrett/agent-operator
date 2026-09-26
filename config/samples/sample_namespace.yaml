@@ -1,0 +1,30 @@
+# Sample Namespace with PodSecurity admission labels.
+#
+# Apply this manifest to create a namespace ready to run agent workloads.
+# The PodSecurity labels enforce the "restricted" standard at the pod level,
+# matching the SecurityContext we set on all AgentRun pods and the operator pod.
+#
+# Usage:
+#   kubectl apply -f config/samples/sample_namespace.yaml
+#
+# On OpenShift you do NOT need these labels — the SCC system provides equivalent
+# enforcement. Apply config/rbac/agent-runtime-scc.yaml instead (or in addition).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agent-system
+  labels:
+    # Enforce: pods that violate restricted policy are rejected at admission.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    # Warn: emit a warning for pods that would violate restricted policy.
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+    # Audit: log violations to the audit log.
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+  annotations:
+    # Inform policy engines (Kyverno / OPA Gatekeeper) that this namespace
+    # is managed by the agent-operator.
+    agent-operator/managed: "true"

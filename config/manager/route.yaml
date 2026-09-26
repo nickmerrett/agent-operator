@@ -1,15 +1,26 @@
-# OpenShift Route — alternative to Ingress for OpenShift clusters
+# OpenShift Route — alternative to Ingress for OpenShift clusters.
+#
+# TLS termination: "edge" means the Route/HAProxy terminates TLS and forwards
+# plain HTTP to the pod on port 8080. This is the correct mode when the operator
+# pod listens on plain HTTP (which it does — ListenAndServe, not ListenAndServeTLS).
+#
+# If you want end-to-end encryption ("passthrough" or "reencrypt"), configure
+# the operator pod with TLS certificates and switch termination accordingly.
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
   name: agent-operator-gateway
   namespace: agent-operator-system
+  labels:
+    app: agent-operator
 spec:
   to:
     kind: Service
     name: agent-operator-gateway
+    weight: 100
   port:
     targetPort: gateway
   tls:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None

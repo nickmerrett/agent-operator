@@ -7,10 +7,19 @@ metadata:
   name: agent-runtime-role
   # namespace: <your-namespace>
 rules:
-  # Read Tool and MCPServer CRs to resolve the tool list
+  # Read all agent CRs needed during startup.
   - apiGroups: ["agent.runtime.io"]
-    resources: ["tools", "mcpservers", "agents", "llmproviders", "memoryproviders"]
+    resources:
+      - tools
+      - mcpservers
+      - agents
+      - llmproviders
+      - memoryproviders
+      - agentpolicies
+      - prompttemplates
     verbs: ["get", "list"]
+
+  # ClusterPolicy is cluster-scoped — needs a separate ClusterRole (see below).
 
   # Read Secrets for LLM and memory credentials
   - apiGroups: [""]
@@ -41,3 +50,28 @@ subjects:
   - kind: ServiceAccount
     name: agent-runtime
     # namespace: <your-namespace>
+---
+# ClusterRole to allow reading ClusterPolicy (cluster-scoped resource).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-runtime-clusterpolicy-reader
+rules:
+  - apiGroups: ["agent.runtime.io"]
+    resources: ["clusterpolicies"]
+    verbs: ["get", "list"]
+---
+# Bind the ClusterPolicy reader to the agent-runtime SA.
+# Replace <your-namespace> with the namespace where agents run.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: agent-runtime-clusterpolicy-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: agent-runtime-clusterpolicy-reader
+subjects:
+  - kind: ServiceAccount
+    name: agent-runtime
+    namespace: agent-system  # override per namespace as needed
