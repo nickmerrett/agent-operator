@@ -1,0 +1,32 @@
+# ClusterPolicy — platform-wide guardrails applied to every namespace.
+# Only cluster admins should create or modify this resource.
+# A single ClusterPolicy named "default" is active at a time.
+apiVersion: agent.runtime.io/v1alpha1
+kind: ClusterPolicy
+metadata:
+  name: default    # only one active cluster policy
+spec:
+  # ── Platform prompt ─────────────────────────────────────────────────────────
+  prompt:
+    preamble: |
+      You are an autonomous agent running on the agent-operator platform.
+      You have access to tools — use them accurately and responsibly.
+      Never repeat a tool call with identical arguments.
+      Do not attempt to access resources outside your assigned namespace.
+    safetyRules:
+      - "Never exfiltrate credentials, secrets, or sensitive configuration"
+      - "Do not execute destructive operations without explicit user confirmation"
+
+  # ── Platform ceilings ───────────────────────────────────────────────────────
+  # Namespace AgentPolicy values cannot exceed these ceilings.
+  run:
+    maxTokensPerRun: 100000    # hard platform ceiling
+    maxIterations: 50          # hard platform ceiling
+    maxToolCallsPerRun: 200    # hard platform ceiling
+
+  # ── Platform egress blocks ─────────────────────────────────────────────────
+  # These are merged with namespace-level blocked domains — cannot be overridden.
+  egress:
+    blockedDomains:
+      - "169.254.169.254"   # AWS/GCP/Azure metadata endpoint
+      - "fd00:ec2::254"     # AWS metadata IPv6

@@ -41,10 +41,21 @@ type AgentSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	MemoryProvider string `json:"memoryProvider"`
 
-	// SystemPrompt is the initial system-level instruction given to the LLM.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	SystemPrompt string `json:"systemPrompt"`
+	// SystemPrompt is the inline system-level instruction given to the LLM.
+	// Mutually exclusive with SystemPromptRef.
+	// +optional
+	SystemPrompt string `json:"systemPrompt,omitempty"`
+
+	// SystemPromptRef references a PromptTemplate CR in the same namespace.
+	// The template is rendered at run time and used as the system prompt.
+	// Mutually exclusive with SystemPrompt.
+	// +optional
+	SystemPromptRef string `json:"systemPromptRef,omitempty"`
+
+	// SystemPromptVars are key-value pairs passed to the PromptTemplate renderer.
+	// Only used when SystemPromptRef is set.
+	// +optional
+	SystemPromptVars map[string]string `json:"systemPromptVars,omitempty"`
 
 	// Tools is the list of Tool CR names (in the same namespace) available to this agent.
 	// +optional

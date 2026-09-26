@@ -45,6 +45,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(agentv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(agentv1alpha1.AddToScheme(scheme)) // registers all types including new CRDs
 }
 
 func main() {
@@ -132,6 +133,30 @@ func main() {
 		RuntimeImage: runtimeImage,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create AgentRunReconciler")
+		os.Exit(1)
+	}
+
+	if err := (&controller.PromptTemplateReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create PromptTemplateReconciler")
+		os.Exit(1)
+	}
+
+	if err := (&controller.AgentPolicyReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create AgentPolicyReconciler")
+		os.Exit(1)
+	}
+
+	if err := (&controller.ClusterPolicyReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create ClusterPolicyReconciler")
 		os.Exit(1)
 	}
 

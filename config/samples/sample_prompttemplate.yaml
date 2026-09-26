@@ -1,0 +1,40 @@
+---
+# Minimal prompt template — no variables, plain text
+apiVersion: agent.runtime.io/v1alpha1
+kind: PromptTemplate
+metadata:
+  name: research-persona
+  namespace: team-alpha
+spec:
+  description: "Research assistant persona with citation requirements"
+  template: |
+    You are a senior research assistant.
+    Always cite your sources when referencing facts.
+    Provide structured, well-organised responses.
+    Be concise but comprehensive.
+---
+# Parameterised template with variables
+apiVersion: agent.runtime.io/v1alpha1
+kind: PromptTemplate
+metadata:
+  name: domain-expert
+  namespace: team-alpha
+spec:
+  description: "Configurable domain expert persona"
+  template: |
+    You are an expert in {{.Domain}}.
+    {{if .Team}}You are assisting the {{.Team}} team.{{end}}
+    Respond in {{.OutputLanguage}}.
+    Focus your answers on practical, actionable insights.
+  variables:
+    - name: Domain
+      required: true
+      description: "The domain or subject area of expertise"
+    - name: Team
+      required: false
+      default: "the organisation"
+      description: "The team this agent is assisting"
+    - name: OutputLanguage
+      required: false
+      default: "English"
+      description: "Language for responses"

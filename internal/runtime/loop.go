@@ -56,6 +56,10 @@ type LoopConfig struct {
 	Tools map[string]tools.Executor
 	// ToolSpecs are the LLM-facing definitions for all available tools.
 	ToolSpecs []llm.ToolDefinition
+
+	// Policy is the resolved effective policy for this run.
+	// If nil, platform defaults are used.
+	Policy *EffectivePolicy
 }
 
 // TraceEvent is a single observability event emitted during a run.
@@ -85,6 +89,19 @@ func Run(ctx context.Context, cfg LoopConfig, prompt string) Result {
 	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 
+	// Resolve effective policy — use platform defaults if nil.
+	policy := cfg.Policy
+	if policy == nil {
+		defaults := platformDefaults
+		policy = &defaults
+	}
+
+	// Apply policy ceiling to maxIterations.
+	maxIter := cfg.MaxIterations
+	if policy.MaxIterations > 0 && policy.MaxIterations < maxIter {
+		maxIter = policy.MaxIterations
+	}
+
 	// Subscribe to inbound messages (follow-ups from the gateway).
 	inbound, unsubscribe, err := cfg.MemoryStore.SubscribeInbound(ctx, cfg.AgentRunName)
 	if err != nil {
@@ -103,14 +120,27 @@ func Run(ctx context.Context, cfg LoopConfig, prompt string) Result {
 	}
 
 	tokensUsed := 0
+	totalToolCalls := 0
+	perToolCalls := make(map[string]int32) // tool name → call count
+	identicalCallCount := make(map[string]int32) // hash(tool+args) → count
 
-	for i := int32(0); i < cfg.MaxIterations; i++ {
+	for i := int32(0); i < maxIter; i++ {
 		// ── Drain any inbound messages before thinking ────────────────────────
 		messages = drainInbound(inbound, messages, ctx)
+
+		// ── Optional iteration delay (rate limiting) ──────────────────────────
+		if policy.MinIterationDelayMs > 0 && i > 0 {
+			select {
+			case <-ctx.Done():
+				return Result{Error: "context cancelled", Iterations: int(i), TokensUsed: tokensUsed}
+			case <-time.After(time.Duration(policy.MinIterationDelayMs) * time.Millisecond):
+			}
+		}
 
 		// ── Think: call the LLM ───────────────────────────────────────────────
 		emitTrace(ctx, cfg, i, "think", map[string]interface{}{
 			"messageCount": len(messages),
+			"tokensUsed":   tokensUsed,
 		})
 
 		resp, err := cfg.LLMClient.Complete(ctx, llm.CompletionRequest{
@@ -125,6 +155,28 @@ func Run(ctx context.Context, cfg LoopConfig, prompt string) Result {
 			}
 		}
 		tokensUsed += resp.TokensUsed
+
+		// ── Token budget enforcement ───────────────────────────────────────────
+		warningTokens := int64(policy.WarningThresholdPercent) * policy.MaxTokensPerRun / 100
+		if int64(tokensUsed) >= policy.MaxTokensPerRun {
+			// Hard limit hit.
+			if policy.OnLimitExceeded == "HardStop" {
+				return Result{
+					Error:      fmt.Sprintf("token budget exhausted (%d tokens, limit %d)", tokensUsed, policy.MaxTokensPerRun),
+					Iterations: int(i) + 1,
+					TokensUsed: tokensUsed,
+				}
+			}
+			// GracefulStop: inject wrap-up instruction and do one final LLM call.
+			return gracefulStop(ctx, cfg, messages, tokensUsed, int(i)+1,
+				fmt.Sprintf("Token budget reached (%d/%d tokens used). Provide your best final answer now with the information you have gathered so far.", tokensUsed, policy.MaxTokensPerRun))
+		}
+		if int64(tokensUsed) >= warningTokens && policy.WarningThresholdPercent > 0 {
+			// Inject a soft warning into the conversation.
+			warnMsg := fmt.Sprintf("[System] You have used %d of %d tokens. Please wrap up your answer soon.", tokensUsed, policy.MaxTokensPerRun)
+			messages = append(messages, llm.Message{Role: llm.RoleUser, Content: warnMsg})
+			_ = cfg.MemoryStore.AppendMessage(ctx, cfg.AgentRunName, llm.Message{Role: llm.RoleUser, Content: warnMsg})
+		}
 
 		// ── Final answer: no tool calls ────────────────────────────────────────
 		if len(resp.ToolCalls) == 0 {
@@ -143,6 +195,40 @@ func Run(ctx context.Context, cfg LoopConfig, prompt string) Result {
 		}
 
 		// ── Act: execute all tool calls in parallel ───────────────────────────
+
+		// Total tool call ceiling check.
+		totalToolCalls += len(resp.ToolCalls)
+		if int32(totalToolCalls) > policy.MaxToolCallsPerRun {
+			if policy.OnLimitExceeded == "HardStop" {
+				return Result{
+					Error:      fmt.Sprintf("tool call limit exceeded (%d calls, limit %d)", totalToolCalls, policy.MaxToolCallsPerRun),
+					Iterations: int(i) + 1,
+					TokensUsed: tokensUsed,
+				}
+			}
+			return gracefulStop(ctx, cfg, messages, tokensUsed, int(i)+1,
+				fmt.Sprintf("Tool call limit reached (%d/%d calls used). Provide your best final answer now.", totalToolCalls, policy.MaxToolCallsPerRun))
+		}
+
+		// Per-tool call ceiling + loop detection.
+		for _, tc := range resp.ToolCalls {
+			if policy.MaxCallsPerTool > 0 {
+				perToolCalls[tc.Name]++
+				if perToolCalls[tc.Name] > policy.MaxCallsPerTool {
+					return gracefulStop(ctx, cfg, messages, tokensUsed, int(i)+1,
+						fmt.Sprintf("Tool %q has been called %d times (limit %d). Provide your best final answer now.", tc.Name, perToolCalls[tc.Name], policy.MaxCallsPerTool))
+				}
+			}
+			if policy.LoopDetectionEnabled {
+				key := tc.Name + "|" + tc.Arguments
+				identicalCallCount[key]++
+				if identicalCallCount[key] >= policy.LoopDetectionMaxIdenticalCalls {
+					return gracefulStop(ctx, cfg, messages, tokensUsed, int(i)+1,
+						fmt.Sprintf("Detected repeated identical call to tool %q (%d times). You appear to be in a loop. Provide your best answer with what you know.", tc.Name, identicalCallCount[key]))
+				}
+			}
+		}
+
 		emitTrace(ctx, cfg, i, "tool_call", map[string]interface{}{
 			"tools": toolCallNames(resp.ToolCalls),
 			"count": len(resp.ToolCalls),
@@ -189,10 +275,37 @@ func Run(ctx context.Context, cfg LoopConfig, prompt string) Result {
 		}
 	}
 
+	// maxIter reached.
+	if policy.OnLimitExceeded == "HardStop" {
+		return Result{
+			Error:      fmt.Sprintf("reached maximum iterations (%d) without a final answer", maxIter),
+			Iterations: int(maxIter),
+			TokensUsed: tokensUsed,
+		}
+	}
+	return gracefulStop(ctx, cfg, messages, tokensUsed, int(maxIter),
+		fmt.Sprintf("You have reached the maximum number of reasoning steps (%d). Provide your best final answer now with what you have gathered.", maxIter))
+}
+
+// gracefulStop injects a wrap-up message and does one final LLM call to get a
+// partial-but-useful answer rather than returning an empty error result.
+func gracefulStop(ctx context.Context, cfg LoopConfig, messages []llm.Message, tokensUsed, iterations int, wrapUpMsg string) Result {
+	messages = append(messages, llm.Message{Role: llm.RoleUser, Content: wrapUpMsg})
+	resp, err := cfg.LLMClient.Complete(ctx, llm.CompletionRequest{
+		Messages: messages,
+		// No tools on the final call — we want a text answer.
+	})
+	if err != nil {
+		return Result{
+			Error:      fmt.Sprintf("graceful stop LLM call failed: %v", err),
+			Iterations: iterations,
+			TokensUsed: tokensUsed,
+		}
+	}
 	return Result{
-		Error:      fmt.Sprintf("reached maximum iterations (%d) without a final answer", cfg.MaxIterations),
-		Iterations: int(cfg.MaxIterations),
-		TokensUsed: tokensUsed,
+		Answer:     strings.TrimSpace(resp.Content),
+		Iterations: iterations,
+		TokensUsed: tokensUsed + resp.TokensUsed,
 	}
 }
 

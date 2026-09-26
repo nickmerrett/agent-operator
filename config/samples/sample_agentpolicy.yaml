@@ -1,0 +1,58 @@
+# AgentPolicy — namespace-level guardrails for team-alpha.
+# All controls are off by default. This example shows a moderate security posture.
+apiVersion: agent.runtime.io/v1alpha1
+kind: AgentPolicy
+metadata:
+  name: default          # "default" applies to all agents in the namespace
+  namespace: team-alpha
+spec:
+  # ── Prompt controls ─────────────────────────────────────────────────────────
+  prompt:
+    preamble: |
+      You operate within the team-alpha namespace.
+      Only access resources you have been explicitly granted permission to use.
+    safetyRules: []       # off by default
+    epilogue: ""          # off by default
+
+  # ── Token + loop controls ───────────────────────────────────────────────────
+  run:
+    maxTokensPerRun: 40000        # lower than platform default (50000)
+    warningThresholdPercent: 75   # warn earlier
+    maxIterations: 20             # tighter than platform default
+    maxToolCallsPerRun: 50        # conservative for this team
+    quotaPerHour: 0               # disabled — no hourly quota
+    quotaPerDay: 0                # disabled — no daily quota
+    maxCallsPerTool: 0            # disabled
+    minIterationDelayMs: 0        # disabled
+    loopDetectionEnabled: false   # off by default
+    onLimitExceeded: GracefulStop
+
+  # ── Tool access controls ─────────────────────────────────────────────────────
+  tools:
+    defaultPolicy: Allow    # allow all tools not explicitly blocked
+    rules:
+      # Block destructive kubectl in this namespace
+      - tool: kubectl-apply
+        allow: false
+        reason: "This namespace does not permit cluster write operations"
+
+  # ── Egress controls ──────────────────────────────────────────────────────────
+  egress:
+    allowedDomains: []    # empty = allow all (except blockedDomains)
+    blockedDomains:
+      - "169.254.169.254" # cloud metadata endpoint — always block
+    requireTLS: false     # off by default
+    auditLog: false       # off by default
+
+  # ── Content controls ─────────────────────────────────────────────────────────
+  content:
+    piiRedaction: false             # off by default
+    promptInjectionDetection: false # off by default
+    blockedInputPatterns: []
+
+  # ── Audit ────────────────────────────────────────────────────────────────────
+  audit:
+    conversationLog: false
+    toolCallLog: false
+    usageLog: false
+    webhookURL: ""

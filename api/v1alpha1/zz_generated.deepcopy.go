@@ -94,6 +94,13 @@ func (in *AgentSpec) DeepCopyInto(out *AgentSpec) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.SystemPromptVars != nil {
+		in, out := &in.SystemPromptVars, &out.SystemPromptVars
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
 }
 
 func (in *AgentSpec) DeepCopy() *AgentSpec {
@@ -630,4 +637,330 @@ func (in *MCPToolDefinition) DeepCopy() *MCPToolDefinition {
 	out := new(MCPToolDefinition)
 	in.DeepCopyInto(out)
 	return out
+}
+
+// ── PromptTemplate ────────────────────────────────────────────────────────────
+
+func (in *PromptTemplate) DeepCopyInto(out *PromptTemplate) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+func (in *PromptTemplate) DeepCopy() *PromptTemplate {
+	if in == nil {
+		return nil
+	}
+	out := new(PromptTemplate)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *PromptTemplate) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *PromptTemplateList) DeepCopyInto(out *PromptTemplateList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]PromptTemplate, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+func (in *PromptTemplateList) DeepCopy() *PromptTemplateList {
+	if in == nil {
+		return nil
+	}
+	out := new(PromptTemplateList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *PromptTemplateList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *PromptTemplateSpec) DeepCopyInto(out *PromptTemplateSpec) {
+	*out = *in
+	if in.Variables != nil {
+		in, out := &in.Variables, &out.Variables
+		*out = make([]PromptTemplateVariable, len(*in))
+		copy(*out, *in)
+	}
+}
+
+func (in *PromptTemplateSpec) DeepCopy() *PromptTemplateSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(PromptTemplateSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *PromptTemplateVariable) DeepCopy() *PromptTemplateVariable {
+	if in == nil {
+		return nil
+	}
+	out := new(PromptTemplateVariable)
+	*out = *in
+	return out
+}
+
+func (in *PromptTemplateStatus) DeepCopyInto(out *PromptTemplateStatus) {
+	*out = *in
+	if in.Conditions != nil {
+		in, out := &in.Conditions, &out.Conditions
+		*out = make([]v1.Condition, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+func (in *PromptTemplateStatus) DeepCopy() *PromptTemplateStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(PromptTemplateStatus)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// ── AgentPolicy ───────────────────────────────────────────────────────────────
+
+func (in *AgentPolicy) DeepCopyInto(out *AgentPolicy) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+func (in *AgentPolicy) DeepCopy() *AgentPolicy {
+	if in == nil {
+		return nil
+	}
+	out := new(AgentPolicy)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *AgentPolicy) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *AgentPolicyList) DeepCopyInto(out *AgentPolicyList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]AgentPolicy, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+func (in *AgentPolicyList) DeepCopy() *AgentPolicyList {
+	if in == nil {
+		return nil
+	}
+	out := new(AgentPolicyList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *AgentPolicyList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *AgentPolicySpec) DeepCopyInto(out *AgentPolicySpec) {
+	*out = *in
+	if in.Prompt.SafetyRules != nil {
+		rules := make([]string, len(in.Prompt.SafetyRules))
+		copy(rules, in.Prompt.SafetyRules)
+		out.Prompt.SafetyRules = rules
+	}
+	out.Run = in.Run
+	if in.Tools.Rules != nil {
+		rules := make([]AgentPolicyToolRule, len(in.Tools.Rules))
+		copy(rules, in.Tools.Rules)
+		out.Tools.Rules = rules
+	}
+	out.Tools.DefaultPolicy = in.Tools.DefaultPolicy
+	if in.Egress.AllowedDomains != nil {
+		ad := make([]string, len(in.Egress.AllowedDomains))
+		copy(ad, in.Egress.AllowedDomains)
+		out.Egress.AllowedDomains = ad
+	}
+	if in.Egress.BlockedDomains != nil {
+		bd := make([]string, len(in.Egress.BlockedDomains))
+		copy(bd, in.Egress.BlockedDomains)
+		out.Egress.BlockedDomains = bd
+	}
+	out.Egress.RequireTLS = in.Egress.RequireTLS
+	out.Egress.AuditLog = in.Egress.AuditLog
+	out.Content = in.Content
+	if in.Content.BlockedInputPatterns != nil {
+		bip := make([]string, len(in.Content.BlockedInputPatterns))
+		copy(bip, in.Content.BlockedInputPatterns)
+		out.Content.BlockedInputPatterns = bip
+	}
+	out.Audit = in.Audit
+}
+
+func (in *AgentPolicySpec) DeepCopy() *AgentPolicySpec {
+	if in == nil {
+		return nil
+	}
+	out := new(AgentPolicySpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *AgentPolicyStatus) DeepCopyInto(out *AgentPolicyStatus) {
+	*out = *in
+	if in.Conditions != nil {
+		in, out := &in.Conditions, &out.Conditions
+		*out = make([]v1.Condition, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+func (in *AgentPolicyStatus) DeepCopy() *AgentPolicyStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(AgentPolicyStatus)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// ── ClusterPolicy ─────────────────────────────────────────────────────────────
+
+func (in *ClusterPolicy) DeepCopyInto(out *ClusterPolicy) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+func (in *ClusterPolicy) DeepCopy() *ClusterPolicy {
+	if in == nil {
+		return nil
+	}
+	out := new(ClusterPolicy)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *ClusterPolicy) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *ClusterPolicyList) DeepCopyInto(out *ClusterPolicyList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]ClusterPolicy, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+func (in *ClusterPolicyList) DeepCopy() *ClusterPolicyList {
+	if in == nil {
+		return nil
+	}
+	out := new(ClusterPolicyList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *ClusterPolicyList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *ClusterPolicySpec) DeepCopyInto(out *ClusterPolicySpec) {
+	*out = *in
+	if in.Prompt.SafetyRules != nil {
+		rules := make([]string, len(in.Prompt.SafetyRules))
+		copy(rules, in.Prompt.SafetyRules)
+		out.Prompt.SafetyRules = rules
+	}
+	out.Run = in.Run
+	if in.Egress.BlockedDomains != nil {
+		bd := make([]string, len(in.Egress.BlockedDomains))
+		copy(bd, in.Egress.BlockedDomains)
+		out.Egress.BlockedDomains = bd
+	}
+}
+
+func (in *ClusterPolicySpec) DeepCopy() *ClusterPolicySpec {
+	if in == nil {
+		return nil
+	}
+	out := new(ClusterPolicySpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *ClusterPolicyStatus) DeepCopyInto(out *ClusterPolicyStatus) {
+	*out = *in
+	if in.Conditions != nil {
+		in, out := &in.Conditions, &out.Conditions
+		*out = make([]v1.Condition, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+func (in *ClusterPolicyStatus) DeepCopy() *ClusterPolicyStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(ClusterPolicyStatus)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// ── AgentSpec SystemPromptVars (updated) ──────────────────────────────────────
+
+func (in *AgentSpec) DeepCopyIntoV2(out *AgentSpec) {
+	in.DeepCopyInto(out)
 }
