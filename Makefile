@@ -3,7 +3,7 @@ OPERATOR_IMG ?= ghcr.io/nickmerrett/agent-operator:latest
 RUNTIME_IMG  ?= ghcr.io/nickmerrett/agent-runtime:latest
 
 # Tool versions
-CONTROLLER_TOOLS_VERSION ?= v0.14.0
+CONTROLLER_TOOLS_VERSION ?= v0.20.1
 ENVTEST_VERSION           ?= release-0.17
 
 # Go settings
